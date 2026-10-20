@@ -27,7 +27,7 @@ set +a
 python3 server.py --supabase --port 8790 --db data/supabase.sqlite3
 ```
 
-Open http://127.0.0.1:8790. This uses a separate app database and does not replace existing local/demo records.
+Open http://127.0.0.1:8790/admin. This uses a separate app database and does not replace existing local/demo records.
 
 The bootstrap email authorizes an administrator in the app. It does **not** create a Supabase user or send mail by itself. The owner activates that authorized email through the login page, sets their own password and confirms the Supabase email. They then return to the app to sign in. No default production password is created.
 
@@ -37,7 +37,7 @@ The administrator creates agents using their login email addresses. Agents activ
 
 Email/password and email confirmation were verified as enabled on 2026-10-20. The project had zero Auth users at the initial check; successful activation/login needs the owner's email and confirmation.
 
-1. Set the Auth Site URL and allowed redirects to the actual app URL once hosting is selected. For local testing use `http://127.0.0.1:8790` if desired. Email confirmation still verifies the account before redirect, but the destination needs configuring for a smooth return.
+1. Set the Auth Site URL and allowed redirects to the actual app URL once hosting is selected. For local testing use `http://127.0.0.1:8790/admin` if desired. Email confirmation still verifies the account before redirect, but the destination needs configuring for a smooth return.
 2. Configure production SMTP before onboarding outside users. Supabase's built-in mail delivery has recipient/rate restrictions; do not assume it will deliver to every agent.
 3. Keep email confirmation enabled. Disable anonymous sign-in. The app still denies unapproved accounts even if someone registers directly against Supabase's public Auth endpoint.
 
@@ -45,7 +45,7 @@ References: [password authentication](https://supabase.com/docs/guides/auth/pass
 
 ## Verification
 
-On 2026-10-20, all 27 automated tests passed, including commission, promotion, refund, agent isolation and mocked Supabase authentication scenarios. The live project's Auth settings confirmed email login and email confirmation; its real `/user` endpoint rejected an invalid token with HTTP 401. The activation form was checked in the browser. A real successful login remains pending the owner's password setup and email confirmation.
+On 2026-10-20, all 27 automated tests passed, including commission, promotion, refund, agent isolation and mocked Supabase authentication scenarios. The live project's Auth settings confirmed email login and email confirmation; its real `/user` endpoint rejected an invalid token with HTTP 401. The activation form was checked in the browser. After the owner completed activation, the browser successfully loaded the authenticated administrator dashboard at `/admin` using the existing Supabase session.
 
 ## Deployment boundary
 

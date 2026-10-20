@@ -45,12 +45,13 @@ class Handler(BaseHTTPRequestHandler):
         # Never log bodies, passwords, cookies, or customer records.
         logging.info("%s %s", self.command, self.path.split("?")[0])
 
-    def headers_common(self):
+    def headers_common(self, nonce=None):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        inline = f" 'nonce-{nonce}'" if nonce else ""
+        self.send_header("Content-Security-Policy", f"default-src 'self'; script-src 'self'{inline}; style-src 'self'{inline}; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 
     def respond(self, status, value, cookie=None):
         encoded = json.dumps(value, ensure_ascii=False).encode()
@@ -180,13 +181,26 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 if path.startswith("/api/"):
                     raise Problem("接口不存在。", 404)
-                files = {"/": "index.html", "/recommend": "index.html", "/app.js": "app.js", "/style.css": "style.css"}
+                files = {
+                    "/": ROOT.parent / "index.html",
+                    "/admin": ROOT / "static" / "index.html",
+                    "/admin/": ROOT / "static" / "index.html",
+                    "/recommend": ROOT / "static" / "index.html",
+                    "/app.js": ROOT / "static" / "app.js",
+                    "/style.css": ROOT / "static" / "style.css",
+                }
                 if path not in files:
                     raise Problem("页面不存在。", 404)
-                file = ROOT / "static" / files[path]
+                file = files[path]
                 blob = file.read_bytes()
+                nonce = None
+                if path == "/":
+                    # Keep the standalone website usable under the same strict CSP.
+                    nonce = secrets.token_urlsafe(24)
+                    blob = blob.replace(b"<style>", f'<style nonce="{nonce}">'.encode())
+                    blob = blob.replace(b"<script>", f'<script nonce="{nonce}">'.encode())
                 self.send_response(200)
-                self.headers_common()
+                self.headers_common(nonce)
                 self.send_header("Content-Type", (mimetypes.guess_type(str(file))[0] or "text/plain") + "; charset=utf-8")
                 self.send_header("Content-Length", str(len(blob)))
                 self.end_headers()
@@ -335,7 +349,8 @@ def main():
         if os.environ.get("SUPABASE_ADMIN_EMAIL"):
             auth.bootstrap(store, os.environ["SUPABASE_ADMIN_EMAIL"])
     server = AppServer(("127.0.0.1", port), store, demo=args.demo, auth=auth)
-    print(f"众仁代理与佣金系统{' · 演示' if args.demo else ''}：http://127.0.0.1:{port}", flush=True)
+    print(f"众仁网站：http://127.0.0.1:{port}/", flush=True)
+    print(f"众仁代理与佣金系统{' · 演示' if args.demo else ''}：http://127.0.0.1:{port}/admin", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
