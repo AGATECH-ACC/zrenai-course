@@ -60,11 +60,26 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(encoded)))
         if cookie:
+            if getattr(self.server, "secure_cookies", False):
+                cookie += "; Secure"
             self.send_header("Set-Cookie", cookie)
         self.end_headers()
         self.wfile.write(encoded)
 
     def check_origin(self):
+        origins = getattr(self.server, "public_origins", None)
+        if origins:
+            host = self.headers.get("Host", "")
+            if "https://" + host not in origins:
+                raise Problem("此域名未获授权。", 403)
+            origin = self.headers.get("Origin")
+            if origin and origin != "https://" + host:
+                raise Problem("跨站请求已拒绝。", 403)
+            # External links may open the public website/admin login. Mutations
+            # require the exact same origin and remain protected by CSRF.
+            if self.command == "POST" and (not origin or self.headers.get("Sec-Fetch-Site") == "cross-site"):
+                raise Problem("跨站请求已拒绝。", 403)
+            return
         allowed = {f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"}
         host = self.headers.get("Host", "")
         if host not in allowed:
@@ -113,6 +128,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def login(self, data):
         key = self.client_address[0]
+        if hasattr(self.server.store, "rate_limit"):
+            self.server.store.rate_limit("login", key, 10, 300)
         attempts = [t for t in self.server.failures.get(key, []) if t > time.time() - 300]
         if len(attempts) >= 10:
             raise Problem("登录尝试过多，请 5 分钟后重试。", 429)
@@ -159,15 +176,21 @@ class Handler(BaseHTTPRequestHandler):
 
     def handle_request(self, mutation):
         try:
-            self.check_origin()
+            from payment_sso import BACKCHANNELS, backchannel, browser_route
             path = urlsplit(self.path).path
+            if path in BACKCHANNELS:
+                backchannel(self, path)
+                return
+            self.check_origin()
+            if browser_route(self, mutation):
+                return
             store = self.server.store
             if not mutation:
                 if path == "/api/session":
                     user = self.session(False)
                     with store.connect() as db:
                         needs_setup = not self.server.auth and not bool(db.execute("SELECT 1 FROM users").fetchone())
-                    self.respond(200, {"needs_setup": needs_setup, "demo": self.server.demo, "auth_provider": "supabase" if self.server.auth else "local", "user": {k: v for k, v in user.items() if k != "token_hash"} if user else None})
+                    self.respond(200, {"needs_setup": needs_setup, "demo": self.server.demo, "cloud": bool(getattr(self.server, "public_origins", None)), "auth_provider": "supabase" if self.server.auth else "local", "user": {k: v for k, v in user.items() if k != "token_hash"} if user else None})
                     return
                 if path == "/api/referral":
                     code = parse_qs(urlsplit(self.path).query).get("code", [""])[0]
@@ -215,12 +238,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(201, {"ok": True})
                 return
             if path == "/api/register" and self.server.auth:
+                if hasattr(store, "rate_limit"):
+                    store.rate_limit("register", self.client_address[0], 5, 3600)
                 self.respond(200, self.server.auth.register(store, data))
                 return
             if path == "/api/login":
                 self.login(data)
                 return
             if path == "/api/inquiries":
+                if hasattr(store, "rate_limit"):
+                    store.rate_limit("inquiry", self.client_address[0], 20, 300)
                 self.server.inquiry_requests = [t for t in self.server.inquiry_requests if t > time.time() - 300]
                 if len(self.server.inquiry_requests) >= 20:
                     raise Problem("提交过于频繁，请稍后重试。", 429)

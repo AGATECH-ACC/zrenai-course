@@ -4,7 +4,7 @@ AI 课程方案、代理推广、订单、佣金、年度晋升与退款管理�
 
 ## 项目内容
 
-- `agent-system/`：Python + SQLite 管理后台、代理个人工作台及课程推荐页面。
+- `agent-system/`：Python 管理后台、代理个人工作台及课程推荐页面；本地使用 SQLite，云端使用 Supabase Postgres。
 - `index.html`：ZrenAI Studio 内容营销展示页（工具规划、创意案例与培训课程）。
 - `AI课程与合作方案_确认稿.html`：可独立分享的方案确认稿。
 
@@ -62,7 +62,11 @@ node --check static/app.js
 
 ## 部署状态
 
-当前版本为本机运行版本，尚未部署为公共网站。线上部署需要支持 Python 的服务、持久数据库存储、HTTPS，以及生产登录与初始化配置。GitHub Pages 只能托管静态方案页，无法运行此后台。
+生产入口：[ZrenAI Studio](https://zrenai.aiedu.academy/) · [管理后台](https://zrenai.aiedu.academy/admin)。
+
+Vercel 项目 `zrenai-course` 使用 Flask / Python 3.12，入口为根目录 `app.py`。业务数据持久保存在 Supabase 的私有 `zrenai_course` schema，通过受限数据库角色和验证证书的 TLS 连接。Supabase Auth 验证邮箱身份，应用继续控制管理员/代理权限。`/admin` 登录使用现有 Supabase 邮箱与密码。
+
+部署、数据库迁移与回滚步骤见 [云端部署说明](agent-system/docs/cloud-deployment.md)。
 
 本仓库不包含本地数据库、客户资料、登录会话或环境密钥。演示数据由代码生成，不能作为线上生产账户使用。
 

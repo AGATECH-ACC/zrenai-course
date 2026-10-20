@@ -13,3 +13,5 @@ venv/
 *.db-*
 agent-system/data/
 node_modules/
+.vercel
+.env*

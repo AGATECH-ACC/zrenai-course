@@ -60,6 +60,9 @@ class SupabaseAuth:
             raise Problem('无法连接 Supabase Auth，请稍后重试。', 503) from None
 
     def install(self, store):
+        if hasattr(store, 'auth_schema_ready'):
+            store.auth_schema_ready()
+            return
         with store.tx() as db:
             if db.execute("SELECT 1 FROM sqlite_master WHERE name='demo_metadata'").fetchone():
                 raise ValueError('Supabase authentication cannot use a seeded demo database.')

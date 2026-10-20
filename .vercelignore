@@ -1,0 +1,15 @@
+.git
+.venv
+.env*
+!.env.example
+agent-system/.env*
+agent-system/data
+agent-system/tests
+agent-system/docs
+scripts
+preview.jpg
+**/__pycache__
+**/*.sqlite*
+**/*.db
+**/*.command
+AI课程与合作方案_确认稿.html

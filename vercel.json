@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "flask",
+  "regions": ["sin1"],
+  "functions": {
+    "app.py": {
+      "maxDuration": 60,
+      "excludeFiles": "{.git/**,.venv/**,agent-system/data/**,agent-system/tests/**,agent-system/docs/**,scripts/**,**/*.command,preview.jpg,AI课程与合作方案_确认稿.html}"
+    }
+  }
+}

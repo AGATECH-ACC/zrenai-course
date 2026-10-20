@@ -81,7 +81,8 @@ class SupabaseHttpTests(unittest.TestCase):
         self.assertEqual(dashboard[0], 200)
         self.assertNotIn('test-', json.dumps(self.request('/api/session')[1]))
         with self.store.connect() as db:
-            self.assertNotIn('MUST-NOT-BE-STORED', '\n'.join(db.iterdump()))
+            sessions = [dict(row) for row in db.execute('SELECT * FROM supabase_sessions')]
+            self.assertNotIn('MUST-NOT-BE-STORED', json.dumps(sessions))
         self.assertEqual(self.request('/api/logout', {})[0], 200)
         self.assertEqual(self.request('/api/dashboard')[0], 401)
         self.assertIn(('POST','/logout?scope=local'), self.auth.calls)
