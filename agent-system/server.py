@@ -188,6 +188,7 @@ class Handler(BaseHTTPRequestHandler):
                     "/recommend": ROOT / "static" / "index.html",
                     "/app.js": ROOT / "static" / "app.js",
                     "/style.css": ROOT / "static" / "style.css",
+                    "/landing-art.png": ROOT / "static" / "landing" / "campaign-concepts.png",
                 }
                 if path not in files:
                     raise Problem("页面不存在。", 404)
