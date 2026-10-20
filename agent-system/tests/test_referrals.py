@@ -2,7 +2,7 @@ import sqlite3
 import unittest
 import test_system
 from demo import seed_demo, ensure_demo_portal
-from store import Problem
+from store import Problem, ClosingConnection
 
 
 class ReferralTests(unittest.TestCase):
@@ -94,7 +94,7 @@ class ReferralTests(unittest.TestCase):
         first = ensure_demo_portal(demo_path)
         second = ensure_demo_portal(demo_path)
         self.assertEqual(first['id'], second['id'])
-        with sqlite3.connect(demo_path) as db:
+        with sqlite3.connect(demo_path, factory=ClosingConnection) as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM agents').fetchone()[0], 5)
             self.assertEqual(db.execute('SELECT COUNT(*) FROM inquiries').fetchone()[0], 2)
             self.assertEqual(db.execute('SELECT COUNT(*) FROM orders').fetchone()[0], 25)

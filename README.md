@@ -63,3 +63,7 @@ node --check static/app.js
 当前版本为本机运行版本，尚未部署为公共网站。线上部署需要支持 Python 的服务、持久数据库存储、HTTPS，以及生产登录与初始化配置。GitHub Pages 只能托管静态方案页，无法运行此后台。
 
 本仓库不包含本地数据库、客户资料、登录会话或环境密钥。演示数据由代码生成，不能作为线上生产账户使用。
+
+## Supabase 认证
+
+已接入 `zrenai` 项目的 Supabase Auth。使用邮箱激活、验证和登录；管理员/代理权限由应用授权，演示账号继续隔离。配置方式、管理员初始化及上线边界见 [Supabase Auth 说明](agent-system/docs/supabase-auth.md)。

@@ -4,7 +4,7 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
-from store import Store, Problem
+from store import Store, Problem, ClosingConnection
 
 DEMO_PASSWORD = "ZhongrenDemo2026!"
 
@@ -12,7 +12,7 @@ DEMO_PASSWORD = "ZhongrenDemo2026!"
 def seed_demo(path):
     destination = Path(path).resolve()
     if destination.exists():
-        with sqlite3.connect(destination) as db:
+        with sqlite3.connect(destination, factory=ClosingConnection) as db:
             marker = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='demo_metadata'").fetchone()
             if not marker or not db.execute("SELECT 1 FROM demo_metadata WHERE version=1").fetchone():
                 raise Problem("此数据库不是演示库，拒绝注入示例数据。")
@@ -90,7 +90,7 @@ def seed_demo(path):
 
 def ensure_demo_portal(path):
     """Add the referral-workspace scenario once, preserving all existing demo activity."""
-    with sqlite3.connect(path) as db:
+    with sqlite3.connect(path, factory=ClosingConnection) as db:
         marker = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='demo_metadata'").fetchone()
         if not marker or not db.execute("SELECT 1 FROM demo_metadata WHERE version=1").fetchone():
             raise Problem("只能在已标记的演示库添加示例账号。")

@@ -24,9 +24,14 @@ ROOT = Path(__file__).resolve().parent
 class AppServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, store, demo=False):
+    def __init__(self, address, store, demo=False, auth=None):
+        if demo and auth:
+            raise ValueError("Demo mode must not connect to real Supabase Auth.")
+        self.auth = auth
+        if auth:
+            auth.install(store)
         self.demo = demo
-        self.cookie_name = "zr_demo_session" if demo else "zr_session"
+        self.cookie_name = "zr_demo_session" if demo else "zr_supabase_session" if auth else "zr_session"
         self.store = store
         self.failures = {}
         self.inquiry_requests = []
@@ -80,7 +85,7 @@ class Handler(BaseHTTPRequestHandler):
             raise Problem("请求格式错误。")
         return value
 
-    def session(self, required=True):
+    def session(self, required=True, verify_provider=True):
         cookie = SimpleCookie()
         try:
             cookie.load(self.headers.get("Cookie", ""))
@@ -92,7 +97,9 @@ class Handler(BaseHTTPRequestHandler):
             with self.server.store.connect() as db:
                 row = db.execute("SELECT u.id,u.username,u.kind,u.agent_id,s.csrf,s.token_hash FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>? AND u.active=1", (digest, int(time.time()))).fetchone()
                 if row:
-                    return dict(row)
+                    user = dict(row)
+                    if not self.server.auth or not verify_provider or self.server.auth.validate_session(self.server.store, user):
+                        return user
         if required:
             raise Problem("请先登录。", 401)
         return None
@@ -108,6 +115,15 @@ class Handler(BaseHTTPRequestHandler):
         attempts = [t for t in self.server.failures.get(key, []) if t > time.time() - 300]
         if len(attempts) >= 10:
             raise Problem("登录尝试过多，请 5 分钟后重试。", 429)
+        if self.server.auth:
+            try:
+                token, ttl = self.server.auth.login(self.server.store, data)
+            except Problem:
+                self.server.failures[key] = attempts + [time.time()]
+                raise
+            self.server.failures.pop(key, None)
+            self.respond(200, {"ok": True}, self.server.cookie_name + "=" + token + "; HttpOnly; SameSite=Strict; Path=/; Max-Age=" + str(ttl))
+            return
         username = text(data.get("username"), "用户名", 60)
         with self.server.store.tx() as db:
             user = db.execute("SELECT * FROM users WHERE username=? AND active=1", (username,)).fetchone()
@@ -122,6 +138,9 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(200, {"ok": True}, self.server.cookie_name + "=" + token + "; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200")
 
     def change_password(self, user, data):
+        if self.server.auth:
+            self.server.auth.change_password(self.server.store, user, data)
+            return
         encoded = password_hash(data.get("new_password"))
         with self.server.store.tx() as db:
             current = db.execute("SELECT password_hash FROM users WHERE id=?", (user["id"],)).fetchone()
@@ -146,8 +165,8 @@ class Handler(BaseHTTPRequestHandler):
                 if path == "/api/session":
                     user = self.session(False)
                     with store.connect() as db:
-                        needs_setup = not bool(db.execute("SELECT 1 FROM users").fetchone())
-                    self.respond(200, {"needs_setup": needs_setup, "demo": self.server.demo, "user": {k: v for k, v in user.items() if k != "token_hash"} if user else None})
+                        needs_setup = not self.server.auth and not bool(db.execute("SELECT 1 FROM users").fetchone())
+                    self.respond(200, {"needs_setup": needs_setup, "demo": self.server.demo, "auth_provider": "supabase" if self.server.auth else "local", "user": {k: v for k, v in user.items() if k != "token_hash"} if user else None})
                     return
                 if path == "/api/referral":
                     code = parse_qs(urlsplit(self.path).query).get("code", [""])[0]
@@ -175,8 +194,13 @@ class Handler(BaseHTTPRequestHandler):
                 return
             data = self.body()
             if path == "/api/setup":
+                if self.server.auth:
+                    raise Problem("管理员邮箱由服务器授权，不允许网页创建管理员。", 403)
                 store.setup(data)
                 self.respond(201, {"ok": True})
+                return
+            if path == "/api/register" and self.server.auth:
+                self.respond(200, self.server.auth.register(store, data))
                 return
             if path == "/api/login":
                 self.login(data)
@@ -188,13 +212,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.server.inquiry_requests.append(time.time())
                 self.respond(201, store.create_inquiry(data))
                 return
-            user = self.session()
+            user = self.session(verify_provider=path != "/api/logout")
             non_admin_paths = {"/api/logout", "/api/password", "/api/orders"}
             is_cancel = path.startswith("/api/orders/") and path.endswith("/cancel")
             is_followup = path.startswith("/api/inquiries/") and path.endswith("/followup")
             self.guard(user, admin=path not in non_admin_paths and not is_cancel and not is_followup)
             result = {"ok": True}
             if path == "/api/logout":
+                if self.server.auth:
+                    self.server.auth.logout(store, user)
                 with store.tx() as db:
                     db.execute("DELETE FROM sessions WHERE token_hash=?", (user["token_hash"],))
                 self.respond(200, result, self.server.cookie_name + "=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")
@@ -202,7 +228,13 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/password":
                 self.change_password(user, data)
             elif path == "/api/agents":
+                if self.server.auth:
+                    from supabase_auth import email_address
+                    data = {**data, "username": email_address(data.get("username")), "password": secrets.token_urlsafe(32)}
                 result = store.create_agent(data, user["id"])
+                if self.server.auth:
+                    result.pop("temporary_password", None)
+                    result["auth_provider"] = "supabase"
             elif path == "/api/policy":
                 result = store.save_policy(data, user["id"])
             elif path == "/api/orders":
@@ -280,16 +312,29 @@ def main():
     parser.add_argument("--port", type=int)
     parser.add_argument("--demo", action="store_true", help="启动隔离演示库并预置测试场景")
     parser.add_argument("--db")
+    parser.add_argument("--supabase", action="store_true", help="Use Supabase email/password authentication")
     args = parser.parse_args()
     os.umask(0o077)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     port = args.port or (8789 if args.demo else 8787)
     database = args.db or str(ROOT / "data" / ("demo.sqlite3" if args.demo else "zhongren.sqlite3"))
+    auth = None
+    use_supabase = args.supabase or os.environ.get("AUTH_PROVIDER") == "supabase"
+    if use_supabase:
+        if args.demo:
+            parser.error("--demo and --supabase cannot be used together")
+        from supabase_auth import SupabaseAuth
+        auth = SupabaseAuth(os.environ.get("SUPABASE_URL", ""), os.environ.get("SUPABASE_PUBLISHABLE_KEY", ""))
     if args.demo:
         from demo import seed_demo, ensure_demo_portal
         seed_demo(database)
         ensure_demo_portal(database)
-    server = AppServer(("127.0.0.1", port), Store(database), demo=args.demo)
+    store = Store(database)
+    if auth:
+        auth.install(store)
+        if os.environ.get("SUPABASE_ADMIN_EMAIL"):
+            auth.bootstrap(store, os.environ["SUPABASE_ADMIN_EMAIL"])
+    server = AppServer(("127.0.0.1", port), store, demo=args.demo, auth=auth)
     print(f"众仁代理与佣金系统{' · 演示' if args.demo else ''}：http://127.0.0.1:{port}", flush=True)
     try:
         server.serve_forever()
